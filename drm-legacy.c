@@ -53,8 +53,13 @@ static int legacy_run(const struct gbm *gbm, const struct egl *egl)
 	uint32_t i = 0;
 	int ret;
 
+#ifdef ENABLE_SURFACELESS
+	uint32_t front_buffer = 0;
+	bo = gbm->surface[front_buffer];
+#else
 	eglSwapBuffers(egl->display, egl->surface);
 	bo = gbm_surface_lock_front_buffer(gbm->surface);
+#endif
 	fb = drm_fb_get_from_bo(bo);
 	if (!fb) {
 		fprintf(stderr, "Failed to get a new framebuffer BO\n");
@@ -73,10 +78,20 @@ static int legacy_run(const struct gbm *gbm, const struct egl *egl)
 		struct gbm_bo *next_bo;
 		int waiting_for_flip = 1;
 
+#ifdef ENABLE_SURFACELESS
+		uint32_t back_buffer = (front_buffer + 1) % NUM_BUFFERS;
+		glBindFramebuffer(GL_FRAMEBUFFER, egl->fbs[back_buffer].fb);
+#endif
+
 		egl->draw(i++);
 
+#ifdef ENABLE_SURFACELESS
+		glFinish();
+		next_bo = gbm->surface[back_buffer];
+#else
 		eglSwapBuffers(egl->display, egl->surface);
 		next_bo = gbm_surface_lock_front_buffer(gbm->surface);
+#endif
 		fb = drm_fb_get_from_bo(next_bo);
 		if (!fb) {
 			fprintf(stderr, "Failed to get a new framebuffer BO\n");
@@ -114,9 +129,13 @@ static int legacy_run(const struct gbm *gbm, const struct egl *egl)
 			drmHandleEvent(drm.fd, &evctx);
 		}
 
+#ifdef ENABLE_SURFACELESS
+		front_buffer = back_buffer;
+#else
 		/* release last buffer to render on again: */
 		gbm_surface_release_buffer(gbm->surface, bo);
 		bo = next_bo;
+#endif
 	}
 
 	return 0;

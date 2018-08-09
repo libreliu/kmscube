@@ -36,9 +36,17 @@ m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 # Obtain compiler/linker options for depedencies
 PKG_CHECK_MODULES(DRM, [libdrm >= 2.4.71])
-PKG_CHECK_MODULES(GBM, gbm >= 13.0)
 PKG_CHECK_MODULES(EGL, egl)
 PKG_CHECK_MODULES(GLES2, glesv2)
+
+if test "x$PLATFORM_CHROMEOS" = "xyes"; then
+	AC_DEFINE(ENABLE_SURFACELESS, 1, [Target platform is ChromeOS])
+	# minigbm reports version 0
+	PKG_CHECK_MODULES(GBM, gbm)
+	AC_SUBST(LDFLAGS, "$LDFLAGS -lglapi")
+else
+	PKG_CHECK_MODULES(GBM, gbm >= 13.0)
+fi
 
 # Check for gst and enable cube-video conditionally:
 PKG_CHECK_MODULES(GST, gstreamer-1.0 >= 1.6.0 gstreamer-plugins-base-1.0 >= 1.6.0 gstreamer-app-1.0 >= 1.6.0 gstreamer-allocators-1.0 >= 1.6.0 gstreamer-video-1.0 >= 1.6.0 glib-2.0,

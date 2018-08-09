@@ -191,6 +191,11 @@ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
 	/* Allow a modeset change for the first commit only. */
 	flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
 
+#ifdef ENABLE_SURFACELESS
+	UNUSED(bo);
+	uint32_t front_buffer = 0;
+#endif
+
 	while (1) {
 		struct gbm_bo *next_bo;
 		EGLSyncKHR gpu_fence = NULL;   /* out-fence from gpu, in-fence to kms */
@@ -211,6 +216,11 @@ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
 			egl->eglWaitSyncKHR(egl->display, kms_fence, 0);
 		}
 
+#ifdef ENABLE_SURFACELESS
+		uint32_t back_buffer = (front_buffer + 1) % NUM_BUFFERS;
+		glBindFramebuffer(GL_FRAMEBUFFER, egl->fbs[back_buffer].fb);
+#endif
+
 		egl->draw(i++);
 
 		/* insert fence to be singled in cmdstream.. this fence will be
@@ -219,7 +229,9 @@ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
 		gpu_fence = create_fence(egl, EGL_NO_NATIVE_FENCE_FD_ANDROID);
 		assert(gpu_fence);
 
+#ifndef ENABLE_SURFACELESS
 		eglSwapBuffers(egl->display, egl->surface);
+#endif
 
 		/* after swapbuffers, gpu_fence should be flushed, so safe
 		 * to get fd:
@@ -228,7 +240,11 @@ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
 		egl->eglDestroySyncKHR(egl->display, gpu_fence);
 		assert(drm.kms_in_fence_fd != -1);
 
+#ifdef ENABLE_SURFACELESS
+		next_bo = gbm->surface[back_buffer];
+#else
 		next_bo = gbm_surface_lock_front_buffer(gbm->surface);
+#endif
 		if (!next_bo) {
 			printf("Failed to lock frontbuffer\n");
 			return -1;
@@ -267,10 +283,14 @@ static int atomic_run(const struct gbm *gbm, const struct egl *egl)
 			return -1;
 		}
 
+#ifdef ENABLE_SURFACELESS
+		front_buffer = back_buffer;
+#else
 		/* release last buffer to render on again: */
 		if (bo)
 			gbm_surface_release_buffer(gbm->surface, bo);
 		bo = next_bo;
+#endif
 
 		/* Allow a modeset change for the first commit only. */
 		flags &= ~(DRM_MODE_ATOMIC_ALLOW_MODESET);

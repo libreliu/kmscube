@@ -214,6 +214,16 @@ static const char *fragment_shader_source_2img =
 
 static const uint32_t texw = 512, texh = 512;
 
+static void *gbm_bo_map_wrapper(struct gbm_bo *bo,
+           uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+           uint32_t flags, uint32_t *stride, void **map_data) {
+#ifdef ENABLE_SURFACELESS
+	return gbm_bo_map(bo, x, y, width, height, flags, stride, map_data, 0);
+#else
+	return gbm_bo_map(bo, x, y, width, height, flags, stride, map_data);
+#endif
+}
+
 WEAK uint64_t
 gbm_bo_get_modifier(struct gbm_bo *bo);
 
@@ -229,7 +239,7 @@ static int get_fd_rgba(uint32_t *pstride, uint64_t *modifier)
 	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
 	bo = gbm_bo_create(gl.gbm->dev, texw, texh, GBM_FORMAT_ABGR8888, GBM_BO_USE_LINEAR);
 
-	map = gbm_bo_map(bo, 0, 0, texw, texh, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
+	map = gbm_bo_map_wrapper(bo, 0, 0, texw, texh, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
 
 	for (uint32_t i = 0; i < texh; i++) {
 		memcpy(&map[stride * i], &src[texw * 4 * i], texw * 4);
@@ -264,7 +274,7 @@ static int get_fd_y(uint32_t *pstride, uint64_t *modifier)
 	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
 	bo = gbm_bo_create(gl.gbm->dev, texw, texh, GBM_FORMAT_R8, GBM_BO_USE_LINEAR);
 
-	map = gbm_bo_map(bo, 0, 0, texw, texh, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
+	map = gbm_bo_map_wrapper(bo, 0, 0, texw, texh, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
 
 	for (uint32_t i = 0; i < texh; i++) {
 		memcpy(&map[stride * i], &src[texw * i], texw);
@@ -299,7 +309,7 @@ static int get_fd_uv(uint32_t *pstride, uint64_t *modifier)
 	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
 	bo = gbm_bo_create(gl.gbm->dev, texw/2, texh/2, GBM_FORMAT_GR88, GBM_BO_USE_LINEAR);
 
-	map = gbm_bo_map(bo, 0, 0, texw/2, texh/2, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
+	map = gbm_bo_map_wrapper(bo, 0, 0, texw/2, texh/2, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
 
 	for (uint32_t i = 0; i < texh/2; i++) {
 		memcpy(&map[stride * i], &src[texw * i], texw);

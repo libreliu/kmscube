@@ -22,12 +22,14 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "common.h"
 
@@ -44,8 +46,32 @@ const struct gbm * init_gbm(int drm_fd, int w, int h, uint64_t modifier)
 {
 	gbm.dev = gbm_create_device(drm_fd);
 	gbm.format = GBM_FORMAT_XRGB8888;
-	gbm.surface = NULL;
 
+#ifdef ENABLE_SURFACELESS
+	bool modifier_available = true;
+	for (size_t i = 0; i < NUM_BUFFERS; i++) {
+		if (gbm_surface_create_with_modifiers && modifier_available) {
+			gbm.surface[i] = gbm_bo_create_with_modifiers(
+					gbm.dev, w, h, gbm.format, &modifier, 1);
+		}
+
+		if (!gbm.surface[i]) {
+			if (modifier != DRM_FORMAT_MOD_LINEAR) {
+				printf("Modifiers requested but support isn't available\n");
+				return NULL;
+			}
+			modifier_available = false;
+			gbm.surface[i] = gbm_bo_create(gbm.dev, w, h, gbm.format,
+						       GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+		}
+
+		if (!gbm.surface[i]) {
+			printf("failed to create gbm surface\n");
+			return NULL;
+		}
+	}
+#else
+	gbm.surface = NULL;
 	if (gbm_surface_create_with_modifiers) {
 		gbm.surface = gbm_surface_create_with_modifiers(gbm.dev, w, h,
 								gbm.format,
@@ -68,6 +94,7 @@ const struct gbm * init_gbm(int drm_fd, int w, int h, uint64_t modifier)
 		printf("failed to create gbm surface\n");
 		return NULL;
 	}
+#endif
 
 	gbm.width = w;
 	gbm.height = h;
@@ -161,6 +188,83 @@ out:
 	return true;
 }
 
+#ifdef ENABLE_SURFACELESS
+static bool
+create_framebuffer(const struct egl *egl, struct gbm_bo *bo,
+		struct framebuffer *fb) {
+	assert(egl->eglCreateImageKHR);
+	assert(bo);
+	assert(fb);
+
+	// 1. Create EGLImage.
+	int fd = gbm_bo_get_fd(bo);
+	if (fd < 0) {
+		printf("failed to get fd for bo: %d\n", fd);
+		return false;
+	}
+
+	EGLint khr_image_attrs[17] = {
+		EGL_WIDTH, gbm_bo_get_width(bo),
+		EGL_HEIGHT, gbm_bo_get_height(bo),
+		EGL_LINUX_DRM_FOURCC_EXT, (int)gbm_bo_get_format(bo),
+		EGL_DMA_BUF_PLANE0_FD_EXT, fd,
+		EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+		EGL_DMA_BUF_PLANE0_PITCH_EXT, gbm_bo_get_stride(bo),
+		EGL_NONE, EGL_NONE,	/* modifier lo */
+		EGL_NONE, EGL_NONE,	/* modifier hi */
+		EGL_NONE,
+	};
+
+	if (egl->modifiers_supported) {
+		const uint64_t modifier = gbm_bo_get_format_modifier(bo);
+		if (modifier != DRM_FORMAT_MOD_LINEAR) {
+			size_t attrs_index = 12;
+			khr_image_attrs[attrs_index++] =
+			    EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
+			khr_image_attrs[attrs_index++] = modifier & 0xfffffffful;
+			khr_image_attrs[attrs_index++] =
+			    EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
+			khr_image_attrs[attrs_index++] = modifier >> 32;
+		}
+	}
+
+	fb->image = egl->eglCreateImageKHR(egl->display, EGL_NO_CONTEXT,
+			EGL_LINUX_DMA_BUF_EXT, NULL /* no client buffer */,
+			khr_image_attrs);
+
+	if (fb->image == EGL_NO_IMAGE_KHR) {
+		printf("failed to make image from buffer object\n");
+		return false;
+	}
+
+	// EGLImage takes the fd ownership.
+	close(fd);
+
+	// 2. Create GL texture and framebuffer.
+	glGenTextures(1, &fb->tex);
+	glBindTexture(GL_TEXTURE_2D, fb->tex);
+	egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, fb->image);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	glGenFramebuffers(1, &fb->fb);
+	glBindFramebuffer(GL_FRAMEBUFFER, fb->fb);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+			fb->tex, 0);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+		printf("failed framebuffer check for created target buffer\n");
+		glDeleteFramebuffers(1, &fb->fb);
+		glDeleteTextures(1, &fb->tex);
+		return false;
+	}
+	return true;
+}
+#endif
+
 int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 {
 	EGLint major, minor;
@@ -170,14 +274,22 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 		EGL_NONE
 	};
 
+#ifdef ENABLE_SURFACELESS
+	UNUSED(samples);
+#endif
+
 	const EGLint config_attribs[] = {
+#ifdef ENABLE_SURFACELESS
+		EGL_SURFACE_TYPE, EGL_DONT_CARE,
+#else
 		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
 		EGL_RED_SIZE, 1,
 		EGL_GREEN_SIZE, 1,
 		EGL_BLUE_SIZE, 1,
 		EGL_ALPHA_SIZE, 0,
-		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
 		EGL_SAMPLES, samples,
+#endif
+		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
 		EGL_NONE
 	};
 	const char *egl_exts_client, *egl_exts_dpy, *gl_exts;
@@ -199,12 +311,16 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 	egl_exts_client = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
 	get_proc_client(EGL_EXT_platform_base, eglGetPlatformDisplayEXT);
 
+#ifdef ENABLE_SURFACELESS
+	egl->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+#else
 	if (egl->eglGetPlatformDisplayEXT) {
 		egl->display = egl->eglGetPlatformDisplayEXT(EGL_PLATFORM_GBM_KHR,
 				gbm->dev, NULL);
 	} else {
 		egl->display = eglGetDisplay((void *)gbm->dev);
 	}
+#endif
 
 	if (!eglInitialize(egl->display, &major, &minor)) {
 		printf("failed to initialize\n");
@@ -239,7 +355,11 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 		return -1;
 	}
 
-	if (!egl_choose_config(egl->display, config_attribs, gbm->format,
+	EGLint visual_id = gbm->format;
+#ifdef ENABLE_SURFACELESS
+	visual_id = 0;
+#endif
+	if (!egl_choose_config(egl->display, config_attribs, visual_id,
                                &egl->config)) {
 		printf("failed to choose config\n");
 		return -1;
@@ -252,12 +372,16 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 		return -1;
 	}
 
+#ifdef ENABLE_SURFACELESS
+	egl->surface = EGL_NO_SURFACE;
+#else
 	egl->surface = eglCreateWindowSurface(egl->display, egl->config,
 			(EGLNativeWindowType)gbm->surface, NULL);
 	if (egl->surface == EGL_NO_SURFACE) {
 		printf("failed to create egl surface\n");
 		return -1;
 	}
+#endif
 
 	/* connect the context to the surface */
 	eglMakeCurrent(egl->display, egl->surface, egl->surface, egl->context);
@@ -272,6 +396,15 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 	printf("===================================\n");
 
 	get_proc_gl(GL_OES_EGL_image, glEGLImageTargetTexture2DOES);
+
+#ifdef ENABLE_SURFACELESS
+	for (size_t i = 0; i < NUM_BUFFERS; i++) {
+		if (!create_framebuffer(egl, gbm->surface[i], &egl->fbs[i])) {
+			printf("failed to create framebuffer\n");
+			return -1;
+		}
+	}
+#endif
 
 	return 0;
 }

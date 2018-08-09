@@ -59,6 +59,7 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreatePlatformPixmapSurfaceEXT (EGLDisplay dpy,
 #endif /* EGL_EXT_platform_base */
 
 #define WEAK __attribute__((weak))
+#define UNUSED(x) (void)(x)
 
 /* Define tokens from EGL_EXT_image_dma_buf_import_modifiers */
 #ifndef EGL_EXT_image_dma_buf_import_modifiers
@@ -76,9 +77,25 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreatePlatformPixmapSurfaceEXT (EGLDisplay dpy,
 #define EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT 0x344A
 #endif
 
+#ifdef ENABLE_SURFACELESS
+// double buffering
+#define NUM_BUFFERS 2
+
+struct framebuffer {
+	EGLImageKHR image;
+	GLuint tex;
+	GLuint fb;
+};
+#endif
+
 struct gbm {
 	struct gbm_device *dev;
+#ifdef ENABLE_SURFACELESS
+	uint32_t front_buffer;
+	struct gbm_bo *surface[NUM_BUFFERS];
+#else
 	struct gbm_surface *surface;
+#endif
 	uint32_t format;
 	int width, height;
 };
@@ -91,6 +108,10 @@ struct egl {
 	EGLConfig config;
 	EGLContext context;
 	EGLSurface surface;
+
+#ifdef ENABLE_SURFACELESS
+	struct framebuffer fbs[NUM_BUFFERS];
+#endif
 
 	PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT;
 	PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR;
