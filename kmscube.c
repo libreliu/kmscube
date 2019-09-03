@@ -183,8 +183,12 @@ int main(int argc, char *argv[])
 		egl = init_cube_smooth(gbm, samples);
 	else if (mode == VIDEO)
 		egl = init_cube_video(gbm, video, samples);
-	else
-		egl = init_cube_tex(gbm, mode, samples);
+	else {
+		if (can_map_gbm_bo())
+			egl = init_cube_tex(gbm, mode, samples);
+		else
+			printf("gbm_bo_map()/gbm_bo_unmap() support missing - cannot display texture on cube\n");
+	}
 
 	if (!egl) {
 		printf("failed to initialize EGL\n");

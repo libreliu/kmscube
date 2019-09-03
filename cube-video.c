@@ -393,5 +393,12 @@ const struct egl * init_cube_video(const struct gbm *gbm, const char *filenames,
 
 	gl.egl.draw = draw_cube_video;
 
+	if (!can_map_gbm_bo()) {
+		printf("NOTE: gbm_bo_map()/gbm_bo_unmap() support is missing. If\n");
+		printf("video frames are not stored in DMA-BUF buffers, then no\n");
+		printf("video will be shown on the cube, because video frames\n");
+		printf("cannot be uploaded from system to a GBM BO.\n");
+	}
+
 	return &gl.egl;
 }

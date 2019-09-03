@@ -411,10 +411,13 @@ buffer_to_image(struct decoder *dec, GstBuffer *buf)
 	if (is_dmabuf_mem) {
 		dmabuf_fd = dup(gst_dmabuf_memory_get_fd(mem));
 	} else {
-		GstMapInfo map_info;
-		gst_buffer_map(buf, &map_info, GST_MAP_READ);
-		dmabuf_fd = buf_to_fd(dec->gbm, map_info.size, map_info.data);
-		gst_buffer_unmap(buf, &map_info);
+		if (can_map_gbm_bo()) {
+			GstMapInfo map_info;
+			gst_buffer_map(buf, &map_info, GST_MAP_READ);
+			dmabuf_fd = buf_to_fd(dec->gbm, map_info.size, map_info.data);
+			gst_buffer_unmap(buf, &map_info);
+		} else
+			GST_TRACE("not displaying video frame on cube since gbm_bo_map()/gbm_bo_unmap() support is missing");
 	}
 
 	if (dmabuf_fd < 0) {

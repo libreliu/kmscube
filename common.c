@@ -75,6 +75,11 @@ const struct gbm * init_gbm(int drm_fd, int w, int h, uint32_t format, uint64_t 
 	return &gbm;
 }
 
+bool can_map_gbm_bo(void)
+{
+	return gbm_bo_map && gbm_bo_unmap;
+}
+
 static bool has_ext(const char *extension_list, const char *ext)
 {
 	const char *ptr = extension_list;

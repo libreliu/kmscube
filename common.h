@@ -101,6 +101,16 @@ struct gbm {
 
 const struct gbm * init_gbm(int drm_fd, int w, int h, uint32_t format, uint64_t modifier);
 
+bool can_map_gbm_bo(void);
+
+WEAK void *
+gbm_bo_map(struct gbm_bo *bo,
+           uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+           uint32_t flags, uint32_t *stride, void **map_data);
+
+WEAK void
+gbm_bo_unmap(struct gbm_bo *bo, void *map_data);
+
 
 struct egl {
 	EGLDisplay display;
