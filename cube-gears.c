@@ -56,7 +56,7 @@ static struct {
 	struct gears_framebuffer gears_fb;
 
 	GLfloat aspect;
-	const struct gbm *gbm;
+	GLsizei width, height;
 
 	GLuint program_face, program_gears;
 
@@ -632,7 +632,7 @@ draw_gears(unsigned i)
 	glEnableVertexAttribArray(gl.in_normal);
 	glEnableVertexAttribArray(gl.in_texcoord);
 
-	glViewport(0, 0, gl.gbm->width, gl.gbm->height);
+	glViewport(0, 0, gl.width, gl.height);
 
 	ESMatrix modelview;
 
@@ -697,7 +697,8 @@ init_cube_gears(const struct gbm *gbm, int samples)
 		return NULL;
 
 	gl.aspect = (GLfloat)(gbm->height) / (GLfloat)(gbm->width);
-	gl.gbm = gbm;
+	gl.width = gbm->width;
+	gl.height = gbm->height;
 
 	ret = create_program(cube_vertex_shader, cube_fragment_shader);
 	if (ret < 0)
