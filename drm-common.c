@@ -31,6 +31,7 @@
 
 #include "common.h"
 #include "drm-common.h"
+#include "drm-lease.h"
 
 WEAK union gbm_bo_handle
 gbm_bo_get_handle_for_plane(struct gbm_bo *bo, int plane);
@@ -79,8 +80,8 @@ struct drm_fb * drm_fb_get_from_bo(struct gbm_bo *bo)
 	format = gbm_bo_get_format(bo);
 
 	if (gbm_bo_get_handle_for_plane && gbm_bo_get_modifier &&
-	    gbm_bo_get_plane_count && gbm_bo_get_stride_for_plane &&
-	    gbm_bo_get_offset) {
+		gbm_bo_get_plane_count && gbm_bo_get_stride_for_plane &&
+		gbm_bo_get_offset) {
 
 		uint64_t modifiers[4] = {0};
 		modifiers[0] = gbm_bo_get_modifier(bo);
@@ -150,10 +151,8 @@ static int32_t find_crtc_for_connector(const struct drm *drm, const drmModeRes *
 	for (i = 0; i < connector->count_encoders; i++) {
 		const uint32_t encoder_id = connector->encoders[i];
 		drmModeEncoder *encoder = drmModeGetEncoder(drm->fd, encoder_id);
-
 		if (encoder) {
 			const int32_t crtc_id = find_crtc_for_encoder(resources, encoder);
-
 			drmModeFreeEncoder(encoder);
 			if (crtc_id != 0) {
 				return crtc_id;
@@ -270,20 +269,24 @@ static drmModeConnector * find_drm_connector(int fd, drmModeRes *resources,
 }
 
 int init_drm(struct drm *drm, const char *device, const char *mode_str,
-		int connector_id, unsigned int vrefresh, unsigned int count)
+		int connector_id, unsigned int vrefresh, unsigned int count, bool lease)
 {
-	drmModeRes *resources;
+	drmModeRes *resources = NULL;
 	drmModeConnector *connector = NULL;
 	drmModeEncoder *encoder = NULL;
 	int i, ret, area;
 
-	if (device) {
-		drm->fd = open(device, O_RDWR);
-		ret = get_resources(drm->fd, &resources);
-		if (ret < 0 && errno == EOPNOTSUPP)
-			printf("%s does not look like a modeset device\n", device);
+	if (lease) {
+		drm->fd = init_drm_lease(&resources);
 	} else {
-		drm->fd = find_drm_device(&resources);
+		if (device) {
+			drm->fd = open(device, O_RDWR);
+			ret = get_resources(drm->fd, &resources);
+			if (ret < 0 && errno == EOPNOTSUPP)
+				printf("%s does not look like a modeset device\n", device);
+		} else {
+			drm->fd = find_drm_device(&resources);
+		}
 	}
 
 	if (drm->fd < 0) {
@@ -327,7 +330,6 @@ int init_drm(struct drm *drm, const char *device, const char *mode_str,
 	if (!drm->mode) {
 		for (i = 0, area = 0; i < connector->count_modes; i++) {
 			drmModeModeInfo *current_mode = &connector->modes[i];
-
 			if (current_mode->type & DRM_MODE_TYPE_PREFERRED) {
 				drm->mode = current_mode;
 				break;
@@ -382,7 +384,8 @@ int init_drm(struct drm *drm, const char *device, const char *mode_str,
 	return 0;
 }
 
-int init_drm_render(struct drm *drm, const char *device, const char *mode_str, unsigned int count)
+int init_drm_render(struct drm *drm, const char *device, const char *mode_str,
+					unsigned int count, bool lease)
 {
 	int width, height;
 	drmModeModeInfo *mode;
@@ -393,10 +396,16 @@ int init_drm_render(struct drm *drm, const char *device, const char *mode_str, u
 	if (sscanf(mode_str, "%dx%d", &width, &height) != 2)
 		return -1;
 
-	if (device) {
-		drm->fd = open(device, O_RDWR);
+	if (lease) {
+		drmModeRes *res;
+		drm->fd = init_drm_lease(&res);
+		drmModeFreeResources (res);
 	} else {
-		drm->fd = find_drm_render_device();
+		if (device) {
+			drm->fd = open(device, O_RDWR);
+		} else {
+			drm->fd = find_drm_render_device();
+		}
 	}
 
 	if (drm->fd < 0) {

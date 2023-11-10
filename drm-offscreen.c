@@ -101,11 +101,11 @@ static int offscreen_run(const struct gbm *gbm, const struct egl *egl)
 	return 0;
 }
 
-const struct drm * init_drm_offscreen(const char *device, const char *mode_str, unsigned int count)
+const struct drm * init_drm_offscreen(const char *device, const char *mode_str, unsigned int count, bool lease)
 {
 	int ret;
 
-	ret = init_drm_render(&drm, device, mode_str, count);
+	ret = init_drm_render(&drm, device, mode_str, count, lease);
 	if (ret)
 		return NULL;
 
