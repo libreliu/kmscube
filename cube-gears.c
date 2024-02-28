@@ -31,7 +31,7 @@
 #include <sys/time.h>
 #include <math.h>
 
-#include <GL/gl.h>
+#include <GLES3/gl3.h>
 
 #include "common.h"
 #include "esUtil.h"
