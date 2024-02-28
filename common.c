@@ -35,6 +35,8 @@
 #include "common.h"
 
 static struct gbm gbm;
+static struct egl _egl;
+static struct egl *egl = &_egl;
 
 WEAK struct gbm_surface *
 gbm_surface_create_with_modifiers(struct gbm_device *gbm,
@@ -299,7 +301,7 @@ create_framebuffer(const struct egl *egl, struct gbm_bo *bo,
 	return true;
 }
 
-int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
+struct egl * init_egl(const struct gbm *gbm, int samples)
 {
 	EGLint major, minor;
 
@@ -346,7 +348,7 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 
 	if (!eglInitialize(egl->display, &major, &minor)) {
 		printf("failed to initialize\n");
-		return -1;
+		return NULL;
 	}
 
 	egl_exts_dpy = eglQueryString(egl->display, EGL_EXTENSIONS);
@@ -374,20 +376,20 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 
 	if (!eglBindAPI(EGL_OPENGL_ES_API)) {
 		printf("failed to bind api EGL_OPENGL_ES_API\n");
-		return -1;
+		return NULL;
 	}
 
 	if (!egl_choose_config(egl->display, config_attribs, gbm->format,
                                &egl->config)) {
 		printf("failed to choose config\n");
-		return -1;
+		return NULL;
 	}
 
 	egl->context = eglCreateContext(egl->display, egl->config,
 			EGL_NO_CONTEXT, context_attribs);
 	if (egl->context == EGL_NO_CONTEXT) {
 		printf("failed to create context\n");
-		return -1;
+		return NULL;
 	}
 
 	if (!gbm->surface) {
@@ -397,7 +399,7 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 				(EGLNativeWindowType)gbm->surface, NULL);
 		if (egl->surface == EGL_NO_SURFACE) {
 			printf("failed to create egl surface\n");
-			return -1;
+			return NULL;
 		}
 	}
 
@@ -431,12 +433,12 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 		for (unsigned i = 0; i < ARRAY_SIZE(gbm->bos); i++) {
 			if (!create_framebuffer(egl, gbm->bos[i], &egl->fbs[i])) {
 				printf("failed to create framebuffer\n");
-				return -1;
+				return NULL;
 			}
 		}
 	}
 
-	return 0;
+	return egl;
 }
 
 int create_program(const char *vs_src, const char *fs_src)
@@ -533,4 +535,60 @@ int64_t get_time_ns(void)
 	struct timespec tv;
 	clock_gettime(CLOCK_MONOTONIC, &tv);
 	return tv.tv_nsec + tv.tv_sec * NSEC_PER_SEC;
+}
+
+WEAK uint64_t
+gbm_bo_get_modifier(struct gbm_bo *bo);
+
+int buf_to_fd(const struct gbm *gbm,
+              uint32_t width, uint32_t height, uint32_t bpp, const void *ptr,
+              uint32_t *pstride, uint64_t *modifier)
+{
+	const uint8_t *src = (const uint8_t *)ptr;
+	uint32_t format;
+	struct gbm_bo *bo;
+	void *map_data = NULL;
+	uint32_t stride;
+	uint8_t *map;
+	int fd;
+
+	switch (bpp) {
+	case 1:
+		format = GBM_FORMAT_R8;
+		break;
+	case 2:
+		format = GBM_FORMAT_GR88;
+		break;
+	case 4:
+		format = GBM_FORMAT_ABGR8888;
+		break;
+	default:
+		assert(!"unreachable");
+		return -1;
+	}
+
+	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
+	bo = gbm_bo_create(gbm->dev, width, height, format, GBM_BO_USE_LINEAR);
+
+	map = gbm_bo_map(bo, 0, 0, width, height, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
+
+	for (uint32_t i = 0; i < height; i++) {
+		memcpy(&map[stride * i], &src[width * bpp * i], width * bpp);
+	}
+
+	gbm_bo_unmap(bo, map_data);
+
+	fd = gbm_bo_get_fd(bo);
+
+	if (gbm_bo_get_modifier)
+		*modifier = gbm_bo_get_modifier(bo);
+	else
+		*modifier = DRM_FORMAT_MOD_LINEAR;
+
+	/* we have the fd now, no longer need the bo: */
+	gbm_bo_destroy(bo);
+
+	*pstride = stride;
+
+	return fd;
 }

@@ -30,8 +30,10 @@
 #include "common.h"
 #include "esUtil.h"
 
+static struct cube cube;
+
 static struct {
-	struct egl egl;
+	const struct egl *egl;
 
 	GLfloat aspect;
 	enum mode mode;
@@ -45,8 +47,6 @@ static struct {
 	GLuint positionsoffset, texcoordsoffset, normalsoffset;
 	GLuint tex[2];
 } gl;
-
-const struct egl *egl = &gl.egl;
 
 static const GLfloat vVertices[] = {
 		// front
@@ -212,120 +212,14 @@ static const char *fragment_shader_source_2img =
 		"}                                              \n";
 
 static const uint32_t texw = 512, texh = 512;
-
-WEAK uint64_t
-gbm_bo_get_modifier(struct gbm_bo *bo);
-
-static int get_fd_rgba(uint32_t *pstride, uint64_t *modifier)
-{
-	struct gbm_bo *bo;
-	void *map_data = NULL;
-	uint32_t stride;
-	extern const uint32_t raw_512x512_rgba[];
-	uint8_t *map, *src = (uint8_t *)raw_512x512_rgba;
-	int fd;
-
-	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
-	bo = gbm_bo_create(gl.gbm->dev, texw, texh, GBM_FORMAT_ABGR8888, GBM_BO_USE_LINEAR);
-
-	map = gbm_bo_map(bo, 0, 0, texw, texh, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
-
-	for (uint32_t i = 0; i < texh; i++) {
-		memcpy(&map[stride * i], &src[texw * 4 * i], texw * 4);
-	}
-
-	gbm_bo_unmap(bo, map_data);
-
-	fd = gbm_bo_get_fd(bo);
-
-	if (gbm_bo_get_modifier)
-		*modifier = gbm_bo_get_modifier(bo);
-	else
-		*modifier = DRM_FORMAT_MOD_LINEAR;
-
-	/* we have the fd now, no longer need the bo: */
-	gbm_bo_destroy(bo);
-
-	*pstride = stride;
-
-	return fd;
-}
-
-static int get_fd_y(uint32_t *pstride, uint64_t *modifier)
-{
-	struct gbm_bo *bo;
-	void *map_data = NULL;
-	uint32_t stride;
-	extern const uint32_t raw_512x512_nv12[];
-	uint8_t *map, *src = (uint8_t *)raw_512x512_nv12;
-	int fd;
-
-	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
-	bo = gbm_bo_create(gl.gbm->dev, texw, texh, GBM_FORMAT_R8, GBM_BO_USE_LINEAR);
-
-	map = gbm_bo_map(bo, 0, 0, texw, texh, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
-
-	for (uint32_t i = 0; i < texh; i++) {
-		memcpy(&map[stride * i], &src[texw * i], texw);
-	}
-
-	gbm_bo_unmap(bo, map_data);
-
-	fd = gbm_bo_get_fd(bo);
-
-	if (gbm_bo_get_modifier)
-		*modifier = gbm_bo_get_modifier(bo);
-	else
-		*modifier = DRM_FORMAT_MOD_LINEAR;
-
-	/* we have the fd now, no longer need the bo: */
-	gbm_bo_destroy(bo);
-
-	*pstride = stride;
-
-	return fd;
-}
-
-static int get_fd_uv(uint32_t *pstride, uint64_t *modifier)
-{
-	struct gbm_bo *bo;
-	void *map_data = NULL;
-	uint32_t stride;
-	extern const uint32_t raw_512x512_nv12[];
-	uint8_t *map, *src = &((uint8_t *)raw_512x512_nv12)[texw * texh];
-	int fd;
-
-	/* NOTE: do not actually use GBM_BO_USE_WRITE since that gets us a dumb buffer: */
-	bo = gbm_bo_create(gl.gbm->dev, texw/2, texh/2, GBM_FORMAT_GR88, GBM_BO_USE_LINEAR);
-
-	map = gbm_bo_map(bo, 0, 0, texw/2, texh/2, GBM_BO_TRANSFER_WRITE, &stride, &map_data);
-
-	for (uint32_t i = 0; i < texh/2; i++) {
-		memcpy(&map[stride * i], &src[texw * i], texw);
-	}
-
-	gbm_bo_unmap(bo, map_data);
-
-	fd = gbm_bo_get_fd(bo);
-
-	if (gbm_bo_get_modifier)
-		*modifier = gbm_bo_get_modifier(bo);
-	else
-		*modifier = DRM_FORMAT_MOD_LINEAR;
-
-	/* we have the fd now, no longer need the bo: */
-	gbm_bo_destroy(bo);
-
-	*pstride = stride;
-
-	return fd;
-}
+extern const uint32_t raw_512x512_rgba[];
+extern const uint32_t raw_512x512_nv12[];
 
 static int init_tex_rgba(void)
 {
 	uint32_t stride;
 	uint64_t modifier;
-	int fd = get_fd_rgba(&stride, &modifier);
+	int fd = buf_to_fd(gl.gbm, texw, texh, 4, raw_512x512_rgba, &stride, &modifier);
 	EGLint attr[] = {
 		EGL_WIDTH, texw,
 		EGL_HEIGHT, texh,
@@ -338,7 +232,7 @@ static int init_tex_rgba(void)
 		EGL_NONE
 	};
 
-	if (egl->modifiers_supported &&
+	if (gl.egl->modifiers_supported &&
 	    modifier != DRM_FORMAT_MOD_INVALID) {
 		unsigned size =  ARRAY_SIZE(attr);
 		attr[size - 5] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
@@ -350,7 +244,7 @@ static int init_tex_rgba(void)
 
 	glGenTextures(1, gl.tex);
 
-	img = egl->eglCreateImageKHR(egl->display, EGL_NO_CONTEXT,
+	img = gl.egl->eglCreateImageKHR(gl.egl->display, EGL_NO_CONTEXT,
 			EGL_LINUX_DMA_BUF_EXT, NULL, attr);
 	assert(img);
 	glActiveTexture(GL_TEXTURE0);
@@ -359,9 +253,9 @@ static int init_tex_rgba(void)
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, img);
+	gl.egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, img);
 
-	egl->eglDestroyImageKHR(egl->display, img);
+	gl.egl->eglDestroyImageKHR(gl.egl->display, img);
 	close(fd);
 
 	return 0;
@@ -371,8 +265,8 @@ static int init_tex_nv12_2img(void)
 {
 	uint32_t stride_y, stride_uv;
 	uint64_t modifier_y, modifier_uv;
-	int fd_y = get_fd_y(&stride_y, &modifier_y);
-	int fd_uv = get_fd_uv(&stride_uv, &modifier_uv);
+	int fd_y = buf_to_fd(gl.gbm, texw, texh, 1, raw_512x512_nv12, &stride_y, &modifier_y);
+	int fd_uv = buf_to_fd(gl.gbm, texw/2, texh/2, 2, &((uint8_t *)raw_512x512_nv12)[texw * texh], &stride_uv, &modifier_uv);
 	EGLint attr_y[] = {
 		EGL_WIDTH, texw,
 		EGL_HEIGHT, texh,
@@ -396,7 +290,7 @@ static int init_tex_nv12_2img(void)
 		EGL_NONE
 	};
 
-	if (egl->modifiers_supported &&
+	if (gl.egl->modifiers_supported &&
 	    modifier_y != DRM_FORMAT_MOD_INVALID &&
 	    modifier_uv != DRM_FORMAT_MOD_INVALID) {
 		unsigned size = ARRAY_SIZE(attr_y);
@@ -417,7 +311,7 @@ static int init_tex_nv12_2img(void)
 	glGenTextures(2, gl.tex);
 
 	/* Y plane texture: */
-	img_y = egl->eglCreateImageKHR(egl->display, EGL_NO_CONTEXT,
+	img_y = gl.egl->eglCreateImageKHR(gl.egl->display, EGL_NO_CONTEXT,
 			EGL_LINUX_DMA_BUF_EXT, NULL, attr_y);
 	assert(img_y);
 	glActiveTexture(GL_TEXTURE0);
@@ -426,13 +320,13 @@ static int init_tex_nv12_2img(void)
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, img_y);
+	gl.egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, img_y);
 
-	egl->eglDestroyImageKHR(egl->display, img_y);
+	gl.egl->eglDestroyImageKHR(gl.egl->display, img_y);
 	close(fd_y);
 
 	/* UV plane texture: */
-	img_uv = egl->eglCreateImageKHR(egl->display, EGL_NO_CONTEXT,
+	img_uv = gl.egl->eglCreateImageKHR(gl.egl->display, EGL_NO_CONTEXT,
 			EGL_LINUX_DMA_BUF_EXT, NULL, attr_uv);
 	assert(img_uv);
 	glActiveTexture(GL_TEXTURE1);
@@ -441,9 +335,9 @@ static int init_tex_nv12_2img(void)
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, img_uv);
+	gl.egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, img_uv);
 
-	egl->eglDestroyImageKHR(egl->display, img_uv);
+	gl.egl->eglDestroyImageKHR(gl.egl->display, img_uv);
 	close(fd_uv);
 
 	return 0;
@@ -453,8 +347,8 @@ static int init_tex_nv12_1img(void)
 {
 	uint32_t stride_y, stride_uv;
 	uint64_t modifier_y, modifier_uv;
-	int fd_y = get_fd_y(&stride_y, &modifier_y);
-	int fd_uv = get_fd_uv(&stride_uv, &modifier_uv);
+	int fd_y = buf_to_fd(gl.gbm, texw, texh, 1, raw_512x512_nv12, &stride_y, &modifier_y);
+	int fd_uv = buf_to_fd(gl.gbm, texw/2, texh/2, 2, &((uint8_t *)raw_512x512_nv12)[texw * texh], &stride_uv, &modifier_uv);
 	EGLint attr[] = {
 		EGL_WIDTH, texw,
 		EGL_HEIGHT, texh,
@@ -473,7 +367,7 @@ static int init_tex_nv12_1img(void)
 	};
 	EGLImage img;
 
-	if (egl->modifiers_supported &&
+	if (gl.egl->modifiers_supported &&
 	    modifier_y != DRM_FORMAT_MOD_INVALID &&
 	    modifier_uv != DRM_FORMAT_MOD_INVALID) {
 		unsigned size = ARRAY_SIZE(attr);
@@ -489,7 +383,7 @@ static int init_tex_nv12_1img(void)
 
 	glGenTextures(1, gl.tex);
 
-	img = egl->eglCreateImageKHR(egl->display, EGL_NO_CONTEXT,
+	img = gl.egl->eglCreateImageKHR(gl.egl->display, EGL_NO_CONTEXT,
 			EGL_LINUX_DMA_BUF_EXT, NULL, attr);
 	assert(img);
 	glActiveTexture(GL_TEXTURE0);
@@ -498,9 +392,9 @@ static int init_tex_nv12_1img(void)
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, img);
+	gl.egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, img);
 
-	egl->eglDestroyImageKHR(egl->display, img);
+	gl.egl->eglDestroyImageKHR(gl.egl->display, img);
 	close(fd_y);
 	close(fd_uv);
 
@@ -572,19 +466,17 @@ static void draw_cube_tex(unsigned i)
 	glDrawArrays(GL_TRIANGLE_STRIP, 20, 4);
 }
 
-const struct egl * init_cube_tex(const struct gbm *gbm, enum mode mode, int samples)
+const struct cube * init_cube_tex(const struct egl *egl, const struct gbm *gbm, enum mode mode)
 {
 	const char *fragment_shader_source = (mode == NV12_2IMG) ?
 			fragment_shader_source_2img : fragment_shader_source_1img;
 	int ret;
 
-	ret = init_egl(&gl.egl, gbm, samples);
-	if (ret)
-		return NULL;
+	gl.egl = egl;
 
-	if (egl_check(&gl.egl, eglCreateImageKHR) ||
-	    egl_check(&gl.egl, glEGLImageTargetTexture2DOES) ||
-	    egl_check(&gl.egl, eglDestroyImageKHR))
+	if (egl_check(gl.egl, eglCreateImageKHR) ||
+	    egl_check(gl.egl, glEGLImageTargetTexture2DOES) ||
+	    egl_check(gl.egl, eglDestroyImageKHR))
 		return NULL;
 
 	gl.aspect = (GLfloat)(gbm->height) / (GLfloat)(gbm->width);
@@ -643,7 +535,7 @@ const struct egl * init_cube_tex(const struct gbm *gbm, enum mode mode, int samp
 		return NULL;
 	}
 
-	gl.egl.draw = draw_cube_tex;
+	cube.draw = draw_cube_tex;
 
-	return &gl.egl;
+	return &cube;
 }

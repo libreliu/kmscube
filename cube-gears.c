@@ -51,12 +51,14 @@ struct gears_framebuffer {
 	GLuint db_tex;
 };
 
+static struct cube cube;
+
 static struct {
 	struct egl egl;
 	struct gears_framebuffer gears_fb;
 
 	GLfloat aspect;
-	const struct gbm *gbm;
+	GLsizei width, height;
 
 	GLuint program_face, program_gears;
 
@@ -632,7 +634,7 @@ draw_gears(unsigned i)
 	glEnableVertexAttribArray(gl.in_normal);
 	glEnableVertexAttribArray(gl.in_texcoord);
 
-	glViewport(0, 0, gl.gbm->width, gl.gbm->height);
+	glViewport(0, 0, gl.width, gl.height);
 
 	ESMatrix modelview;
 
@@ -687,22 +689,16 @@ draw_gears(unsigned i)
 	gears_framebuffer_destroy();
 }
 
-const struct egl *
-init_cube_gears(const struct gbm *gbm, int samples)
+const struct cube *
+init_cube_gears(const struct egl *egl, const struct gbm *gbm)
 {
 	int ret;
 
-	ret = init_egl(&gl.egl, gbm, samples);
-	if (ret)
-		return NULL;
-
-	if (egl_check(&gl.egl, eglCreateImageKHR) ||
-	    egl_check(&gl.egl, glEGLImageTargetTexture2DOES) ||
-	    egl_check(&gl.egl, eglDestroyImageKHR))
-		return NULL;
+	(void)egl;
 
 	gl.aspect = (GLfloat)(gbm->height) / (GLfloat)(gbm->width);
-	gl.gbm = gbm;
+	gl.width = gbm->width;
+	gl.height = gbm->height;
 
 	ret = create_program(cube_vertex_shader, cube_fragment_shader);
 	if (ret < 0)
@@ -778,7 +774,7 @@ init_cube_gears(const struct gbm *gbm, int samples)
 
 	esFrustum(&gears_projection_matrix, -1.0, 1.0, -1.0, 1.0, 5.0, 60.0);
 
-	gl.egl.draw = draw_gears;
+	cube.draw = draw_gears;
 
-	return &gl.egl;
+	return &cube;
 }

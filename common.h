@@ -145,8 +145,6 @@ struct egl {
 	PFNGLGETPERFMONITORCOUNTERDATAAMDPROC    glGetPerfMonitorCounterDataAMD;
 
 	bool modifiers_supported;
-
-	void (*draw)(unsigned i);
 };
 
 static inline int __egl_check(void *ptr, const char *name)
@@ -160,9 +158,13 @@ static inline int __egl_check(void *ptr, const char *name)
 
 #define egl_check(egl, name) __egl_check((egl)->name, #name)
 
-int init_egl(struct egl *egl, const struct gbm *gbm, int samples);
+struct egl * init_egl(const struct gbm *gbm, int samples);
 int create_program(const char *vs_src, const char *fs_src);
 int link_program(unsigned program);
+
+struct cube {
+	void (*draw)(unsigned i);
+};
 
 enum mode {
 	SMOOTH,        /* smooth-shaded */
@@ -173,17 +175,17 @@ enum mode {
 	SHADERTOY,     /* display shadertoy shader */
 };
 
-const struct egl * init_cube_smooth(const struct gbm *gbm, int samples);
-const struct egl * init_cube_tex(const struct gbm *gbm, enum mode mode, int samples);
-const struct egl * init_cube_gears(const struct gbm *gbm, int samples);
+const struct cube * init_cube_smooth(const struct egl *egl, const struct gbm *gbm);
+const struct cube * init_cube_tex(const struct egl *egl, const struct gbm *gbm, enum mode mode);
+const struct cube * init_cube_gears(const struct egl *egl, const struct gbm *gbm);
 
 #ifdef HAVE_GLES3
-const struct egl * init_cube_shadertoy(const struct gbm *gbm, const char *shadertoy, int samples);
+const struct cube * init_cube_shadertoy(const struct egl *egl, const struct gbm *gbm, const char *shadertoy);
 #else
-static inline const struct egl *
-init_cube_shadertoy(const struct gbm *gbm, const char *shadertoy, int samples)
+static inline const struct cube *
+init_cube_shadertoy(const struct egl *egl, const struct gbm *gbm, const char *shadertoy)
 {
-	(void)gbm; (void)shadertoy; (void)samples;
+	(void)egl; (void)gbm; (void)shadertoy;
 	printf("no GLES3 support!\n");
 	return NULL;
 }
@@ -196,13 +198,13 @@ struct decoder * video_init(const struct egl *egl, const struct gbm *gbm, const 
 EGLImage video_frame(struct decoder *dec);
 void video_deinit(struct decoder *dec);
 
-const struct egl * init_cube_video(const struct gbm *gbm, const char *video, int samples);
+const struct cube * init_cube_video(const struct egl *egl, const struct gbm *gbm, const char *video);
 
 #else
-static inline const struct egl *
-init_cube_video(const struct gbm *gbm, const char *video, int samples)
+static inline const struct cube *
+init_cube_video(const struct egl *egl, const struct gbm *gbm, const char *video)
 {
-	(void)gbm; (void)video; (void)samples;
+	(void)egl; (void)gbm; (void)video;
 	printf("no GStreamer support!\n");
 	return NULL;
 }
@@ -211,13 +213,18 @@ init_cube_video(const struct gbm *gbm, const char *video, int samples)
 void init_perfcntrs(const struct egl *egl, const char *perfcntrs);
 void start_perfcntrs(void);
 void end_perfcntrs(void);
-void finish_perfcntrs(void);
-void dump_perfcntrs(unsigned nframes, uint64_t elapsed_time_ns);
+void start_fpscntrs(void);
+void end_fpscntrs(void);
+void finish_fpscntrs(void);
 
 #define NSEC_PER_SEC (INT64_C(1000) * USEC_PER_SEC)
 #define USEC_PER_SEC (INT64_C(1000) * MSEC_PER_SEC)
 #define MSEC_PER_SEC INT64_C(1000)
 
 int64_t get_time_ns(void);
+
+int buf_to_fd(const struct gbm *gbm,
+              uint32_t width, uint32_t height, uint32_t bpp, const void *ptr,
+              uint32_t *pstride, uint64_t *modifier);
 
 #endif /* _COMMON_H */

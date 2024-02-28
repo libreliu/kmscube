@@ -39,11 +39,9 @@
 #include "common.h"
 #include "esUtil.h"
 
+static struct cube cube;
+
 static struct {
-	struct egl egl;
-
-	const struct gbm *gbm;
-
 	/* Shadertoy rendering (to FBO): */
 	GLuint stoy_program;
 	GLuint stoy_fbo, stoy_fbotex;
@@ -52,6 +50,7 @@ static struct {
 
 	/* Cube rendering (textures from FBO): */
 	GLfloat aspect;
+	GLsizei width, height;
 	GLuint program;
 	/* uniform handles: */
 	GLint modelviewmatrix, modelviewprojectionmatrix, normalmatrix;
@@ -331,7 +330,7 @@ static void draw_cube_shadertoy(unsigned i)
 
 	draw_shadertoy(i);
 
-	glViewport(0, 0, gl.gbm->width, gl.gbm->height);
+	glViewport(0, 0, gl.width, gl.height);
 	glEnable(GL_CULL_FACE);
 
 	/* clear the color buffer */
@@ -398,16 +397,15 @@ static void draw_cube_shadertoy(unsigned i)
 	glDisableVertexAttribArray(2);
 }
 
-const struct egl * init_cube_shadertoy(const struct gbm *gbm, const char *file, int samples)
+const struct cube * init_cube_shadertoy(const struct egl *egl, const struct gbm *gbm, const char *file)
 {
 	int ret;
 
-	ret = init_egl(&gl.egl, gbm, samples);
-	if (ret)
-		return NULL;
+	(void)egl;
 
 	gl.aspect = (GLfloat)(gbm->height) / (GLfloat)(gbm->width);
-	gl.gbm = gbm;
+	gl.width = gbm->width;
+	gl.height = gbm->height;
 
 	ret = create_program(cube_vs, cube_fs);
 	if (ret < 0)
@@ -453,7 +451,7 @@ const struct egl * init_cube_shadertoy(const struct gbm *gbm, const char *file, 
 		return NULL;
 	}
 
-	gl.egl.draw = draw_cube_shadertoy;
+	cube.draw = draw_cube_shadertoy;
 
-	return &gl.egl;
+	return &cube;
 }

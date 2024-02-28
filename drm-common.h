@@ -66,7 +66,7 @@ struct drm {
 	/* number of frames to run for: */
 	unsigned int count;
 
-	int (*run)(const struct gbm *gbm, const struct egl *egl);
+	int (*run)(const struct gbm *gbm, const struct egl *egl, const struct cube *cube);
 };
 
 struct drm_fb {
