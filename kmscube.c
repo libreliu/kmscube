@@ -58,6 +58,7 @@ static const struct option longopts[] = {
 	{"video",  required_argument, 0, 'V'},
 	{"vmode",  required_argument, 0, 'v'},
 	{"surfaceless", no_argument,  0, 'x'},
+	{"lease", no_argument, 0, 'l'},
 	{0, 0, 0, 0}
 };
 
@@ -88,6 +89,7 @@ static void usage(const char *name)
 			"    -v, --vmode=VMODE        specify the video mode in the format\n"
 			"                             <mode>[-<vrefresh>]\n"
 			"    -x, --surfaceless        use surfaceless mode, instead of gbm surface\n"
+			"    -l, --lease              request drm fd from wayland drm-lease protocol\n"
 			,
 			name);
 }
@@ -113,6 +115,7 @@ int main(int argc, char *argv[])
 	unsigned int vrefresh = 0;
 	unsigned int count = ~0;
 	bool surfaceless = false;
+	bool lease = false;
 
 #ifdef HAVE_GST
 	gst_init(&argc, &argv);
@@ -202,6 +205,9 @@ int main(int argc, char *argv[])
 		case 'x':
 			surfaceless = true;
 			break;
+		case 'l':
+			lease = true;
+			break;
 		default:
 			usage(argv[0]);
 			return -1;
@@ -214,11 +220,11 @@ int main(int argc, char *argv[])
 	}
 
 	if (offscreen)
-		drm = init_drm_offscreen(device, mode_str, count);
+		drm = init_drm_offscreen(device, mode_str, count, lease);
 	else if (atomic)
-		drm = init_drm_atomic(device, mode_str, connector_id, vrefresh, count);
+		drm = init_drm_atomic(device, mode_str, connector_id, vrefresh, count, lease);
 	else
-		drm = init_drm_legacy(device, mode_str, connector_id, vrefresh, count);
+		drm = init_drm_legacy(device, mode_str, connector_id, vrefresh, count, lease);
 	if (!drm) {
 		printf("failed to initialize %s DRM\n",
 		       offscreen ? "offscreen" :

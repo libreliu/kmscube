@@ -808,6 +808,7 @@ static const struct option longopts[] = {
 	{"zoom",   no_argument,       0, 'z'},
 #ifdef HAVE_LIBPNG
 	{"png",    no_argument,       0, 'p'},
+	{"lease",  no_argument,       0, 'l'},
 #endif
 	{0, 0, 0, 0}
 };
@@ -827,6 +828,7 @@ static void usage(const char *name)
 #ifdef HAVE_LIBPNG
 		"    -p, --png            capture the screen to a png image\n"
 #endif
+		"    -l, --lease          request drm fd from wayland drm-lease protocol\n"
 		"\n"
 		"where:\n"
 		"    <target>  is one of 2D/2DArray/3D\n"
@@ -863,6 +865,7 @@ int main(int argc, char *argv[])
 	int ret, opt;
 	unsigned int len;
 	unsigned int vrefresh = 0;
+	bool lease;
 
 	while ((opt = getopt_long_only(argc, argv, shortopts, longopts, NULL)) != -1) {
 		switch (opt) {
@@ -899,6 +902,9 @@ int main(int argc, char *argv[])
 			png = true;
 			break;
 #endif
+		case 'l':
+			lease = true;
+			break;
 		default:
 			usage(argv[0]);
 		}
@@ -950,7 +956,7 @@ int main(int argc, char *argv[])
 	print_summary();
 
 	/* no real need for atomic here: */
-	drm = init_drm_legacy(device, mode_str, -1, vrefresh, ~0);
+	drm = init_drm_legacy(device, mode_str, -1, vrefresh, ~0, lease);
 	if (!drm) {
 		printf("failed to initialize DRM\n");
 		return -1;

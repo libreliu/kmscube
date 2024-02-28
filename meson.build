@@ -25,7 +25,7 @@ project(
   'c',
   version : '0.0.1',
   license : 'MIT',
-  meson_version : '>= 0.47',
+  meson_version : '>= 0.62',
   default_options : ['c_std=gnu99', 'warning_level=2']
 )
 
@@ -41,6 +41,7 @@ sources = files(
   'drm-atomic.c',
   'drm-common.c',
   'drm-legacy.c',
+  'drm-lease.c',
   'drm-offscreen.c',
   'esTransform.c',
   'frame-512x512-NV12.c',
@@ -56,6 +57,12 @@ dep_libdrm = dependency('libdrm', version : '>=2.4.71')
 dep_gbm = dependency('gbm', version : '>=13.0')
 dep_egl = dependency('egl')
 dep_gles2 = dependency('glesv2')
+
+dep_wl = dependency('wayland-client')
+mod_wl = import('unstable-wayland')
+
+drm_lease_xml = mod_wl.find_protocol('drm-lease', state: 'staging', version: 1)
+drm_lease = mod_wl.scan_xml(drm_lease_xml)
 
 with_gles3 = cc.check_header('GLES3/gl3.h', dependencies: dep_gles2)
 
@@ -73,7 +80,7 @@ if dep_libpng.found()
   add_project_arguments('-DHAVE_LIBPNG', language : 'c')
 endif
 
-dep_common = [dep_m, dep_threads, dep_libdrm, dep_gbm, dep_egl, dep_gles2, dep_libpng]
+dep_common = [dep_m, dep_threads, dep_libdrm, dep_gbm, dep_egl, dep_gles2, dep_libpng, dep_wl]
 
 dep_gst = []
 foreach _dep : [
@@ -104,7 +111,7 @@ else
   message('Building without gstreamer support')
 endif
 
-executable('kmscube', sources, dependencies : dep_common, install : true)
+executable('kmscube', sources, drm_lease, dependencies : dep_common, install : true)
 
 if with_gles3
   executable('texturator', files(
@@ -113,5 +120,6 @@ if with_gles3
     'drm-common.c',
     'perfcntrs.c',  # not used, but required to link
     'texturator.c',
-  ), dependencies : dep_common, install : true)
+    'drm-lease.c'
+  ), drm_lease, dependencies : dep_common, install : true)
 endif
